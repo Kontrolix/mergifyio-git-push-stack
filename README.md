@@ -18,7 +18,7 @@ repository as base branch of a pull request must live in the main repsository.
 Then you change commit `A`, well you have to updated all your branches manually
 and update each pull requests.
 
-This a time consuming and error-prone process.
+This a time consuming and error-pronfgdsfdge process.
 
 You can't update only `feature-A` otherwise other branch become outdated.
 
