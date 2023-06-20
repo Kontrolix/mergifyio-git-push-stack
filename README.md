@@ -23,7 +23,7 @@ This a time consuming and error-pronfgdsfdge process.
 You can't update only `feature-A` otherwise other branch become outdated.
 
 
-## The compromise for the automation of the tidy process
+## The compromisfdgsdfge for the automation of the tidy process
 
 Each time you change the feature branch and rebase/update your sub-feature
 branches all commit sha changes and maybe you added a commit, or removed one, or
