@@ -21,7 +21,7 @@ and update each pull requests.
 This a time consuming and error-pronfgdsfdge process.
 
 You can't update only `feature-A` otherwise other branch become outdated.
-
+sdfsdf
 
 ## The compromisfdgsdfge for the automation of the tidy process
 
