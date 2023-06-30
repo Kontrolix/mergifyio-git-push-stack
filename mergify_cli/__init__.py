@@ -436,6 +436,7 @@ async def main(
     else:
         event_hooks = {}
 
+    console.log(f"Token {token}")
     async with httpx.AsyncClient(
         base_url=f"https://api.github.com/repos/{user}/{repo}/",
         headers={
