@@ -553,7 +553,7 @@ def get_default_branch_prefix() -> str:
 def get_default_token() -> str:
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
-        token = subprocess.check_output("gh auth token", shell=True)
+        token = subprocess.check_output("gh auth token", shell=True).decode().strip()
     if DEBUG:
         console.print(f"[purple]DEBUG: token: {token}[/]")
     return token
