@@ -39,9 +39,11 @@ except ImportError:
 
 CHANGEID_RE = re.compile(r"Change-Id: (I[0-9a-z]{40})")
 READY_FOR_REVIEW_TEMPLATE = 'mutation { markPullRequestReadyForReview(input: { pullRequestId: "%s" }) { clientMutationId } }'
+DRAFT_TEMPLATE = 'mutation { convertPullRequestToDraft(input: { pullRequestId: "%s" }) { clientMutationId } }'
 console = rich.console.Console(log_path=False, log_time=False)
 
 DEBUG = False
+DRAFT = False
 
 
 def check_for_graphql_errors(response: httpx.Response) -> None:
@@ -191,11 +193,11 @@ async def get_local_changes(
             action = "to create"
             url = f"<{stack_prefix}/{changeid}>"
             commit_info = commit[-7:]
-        elif commit == pull["head"]["sha"]:
-            if i == 0 and pull["draft"]:
-                action = "ready_for_review"
+        elif DRAFT is not pull["draft"]:
+            if DRAFT:
+                action = "ready_for_review -> draft"
             else:
-                action = "nothing"
+                action = "draft -> ready_for_review"
             url = pull["html_url"]
             commit_info = commit[-7:]
         else:
@@ -256,7 +258,6 @@ async def create_or_update_stack(
     commit: str,
     title: str,
     message: str,
-    ready_for_review: bool,
     known_changeids: KnownChangeIDs,
 ) -> tuple[PullRequest, str]:
     if changeid in known_changeids:
@@ -281,19 +282,8 @@ async def create_or_update_stack(
 
     pull = known_changeids.get(changeid)
     if pull and pull["head"]["sha"] == commit:
-        if ready_for_review and pull["draft"]:
-            action = "ready_for_review"
-            r = await client.post(
-                "https://api.github.com/graphql",
-                headers={
-                    "Accept": "application/vnd.github.v4.idl",
-                    "User-Agent": f"mergify_cli/{VERSION}",
-                    "Authorization": client.headers["Authorization"],
-                },
-                json={"query": READY_FOR_REVIEW_TEMPLATE % pull["node_id"]},
-            )
-            check_for_status(r)
-            check_for_graphql_errors(r)
+        if DRAFT is not pull["draft"]:
+            action = await check_and_update_pull_status(client, pull)
         else:
             action = "nothing"
     elif pull:
@@ -312,18 +302,8 @@ async def create_or_update_stack(
             )
             check_for_status(r)
             pull = typing.cast(PullRequest, r.json())
-            if ready_for_review and pull["draft"]:
-                r = await client.post(
-                    "https://api.github.com/graphql",
-                    headers={
-                        "Accept": "application/vnd.github.v4.idl",
-                        "User-Agent": f"mergify_cli/{VERSION}",
-                        "Authorization": client.headers["Authorization"],
-                    },
-                    json={"query": READY_FOR_REVIEW_TEMPLATE % pull["node_id"]},
-                )
-                check_for_status(r)
-                check_for_graphql_errors(r)
+            if DRAFT is not pull["draft"]:
+                action = await check_and_update_pull_status(client, pull)
     else:
         action = "created"
         with console.status(
@@ -334,7 +314,7 @@ async def create_or_update_stack(
                 json={
                     "title": title,
                     "body": message,
-                    "draft": not ready_for_review,
+                    "draft": DRAFT,
                     "head": stacked_dest_branch,
                     "base": stacked_base_branch,
                 },
@@ -342,6 +322,31 @@ async def create_or_update_stack(
             check_for_status(r)
             pull = typing.cast(PullRequest, r.json())
     return pull, action
+
+
+async def check_and_update_pull_status(
+    client: httpx.AsyncClient, pull: PullRequest
+) -> str:
+    if DRAFT:
+        action = "draft"
+        template = DRAFT_TEMPLATE
+    else:
+        action = "ready_for_review"
+        template = READY_FOR_REVIEW_TEMPLATE
+
+    r = await client.post(
+        "https://api.github.com/graphql",
+        headers={
+            "Accept": "application/vnd.github.v4.idl",
+            "User-Agent": f"mergify_cli/{VERSION}",
+            "Authorization": client.headers["Authorization"],
+        },
+        json={"query": template % pull["node_id"]},
+    )
+    check_for_status(r)
+    check_for_graphql_errors(r)
+
+    return action
 
 
 async def delete_stack(
@@ -475,7 +480,6 @@ async def main(
 
         console.log("New stacked pull request:", style="green")
         stacked_base_branch = base_branch
-        ready_for_review = True
         pulls: list[PullRequest] = []
         continue_create_or_update = True
         for changeid, commit, title, message in changes:
@@ -492,7 +496,6 @@ async def main(
                     commit,
                     title,
                     message + depends_on,
-                    ready_for_review,
                     known_changeids,
                 )
                 pulls.append(pull)
@@ -514,7 +517,6 @@ async def main(
                 f"* [blue]\\[{action}][/] '[red]{commit[-7:]}[/] - [b]{pull['title']}[/] {pull['html_url']} - {changeid}"
             )
             stacked_base_branch = stacked_dest_branch
-            ready_for_review = False
             if continue_create_or_update and next_only:
                 continue_create_or_update = False
 
@@ -564,12 +566,14 @@ def get_default_token() -> str:
 
 def cli() -> None:
     global DEBUG
+    global DRAFT
     parser = argparse.ArgumentParser(description="mrgfy")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--setup", action="store_true")
     parser.add_argument("--stack", "-s", action="store_true")
     parser.add_argument("--dry-run", "-n", action="store_true")
     parser.add_argument("--next-only", "-x", action="store_true")
+    parser.add_argument("--draft", "-d", action="store_true")
     parser.add_argument(
         "--branch-prefix",
         default=get_default_branch_prefix(),
@@ -584,6 +588,10 @@ def cli() -> None:
     args = parser.parse_args()
     if args.debug:
         DEBUG = True
+
+    if args.draft:
+        DRAFT = True
+
     if args.setup:
         asyncio.run(do_setup())
     else:
