@@ -42,6 +42,7 @@ READY_FOR_REVIEW_TEMPLATE = 'mutation { markPullRequestReadyForReview(input: { p
 console = rich.console.Console(log_path=False, log_time=False)
 
 DEBUG = False
+DRAFT = False
 
 
 def check_for_graphql_errors(response: httpx.Response) -> None:
@@ -256,7 +257,6 @@ async def create_or_update_stack(
     commit: str,
     title: str,
     message: str,
-    ready_for_review: bool,
     known_changeids: KnownChangeIDs,
 ) -> tuple[PullRequest, str]:
     if changeid in known_changeids:
@@ -281,7 +281,7 @@ async def create_or_update_stack(
 
     pull = known_changeids.get(changeid)
     if pull and pull["head"]["sha"] == commit:
-        if ready_for_review and pull["draft"]:
+        if not DRAFT and pull["draft"]:
             action = "ready_for_review"
             r = await client.post(
                 "https://api.github.com/graphql",
@@ -312,7 +312,7 @@ async def create_or_update_stack(
             )
             check_for_status(r)
             pull = typing.cast(PullRequest, r.json())
-            if ready_for_review and pull["draft"]:
+            if not DRAFT and pull["draft"]:
                 r = await client.post(
                     "https://api.github.com/graphql",
                     headers={
@@ -334,7 +334,7 @@ async def create_or_update_stack(
                 json={
                     "title": title,
                     "body": message,
-                    "draft": not ready_for_review,
+                    "draft": DRAFT,
                     "head": stacked_dest_branch,
                     "base": stacked_base_branch,
                 },
@@ -475,7 +475,6 @@ async def main(
 
         console.log("New stacked pull request:", style="green")
         stacked_base_branch = base_branch
-        ready_for_review = True
         pulls: list[PullRequest] = []
         continue_create_or_update = True
         for changeid, commit, title, message in changes:
@@ -492,7 +491,6 @@ async def main(
                     commit,
                     title,
                     message + depends_on,
-                    ready_for_review,
                     known_changeids,
                 )
                 pulls.append(pull)
@@ -514,7 +512,6 @@ async def main(
                 f"* [blue]\\[{action}][/] '[red]{commit[-7:]}[/] - [b]{pull['title']}[/] {pull['html_url']} - {changeid}"
             )
             stacked_base_branch = stacked_dest_branch
-            ready_for_review = False
             if continue_create_or_update and next_only:
                 continue_create_or_update = False
 
@@ -570,6 +567,7 @@ def cli() -> None:
     parser.add_argument("--stack", "-s", action="store_true")
     parser.add_argument("--dry-run", "-n", action="store_true")
     parser.add_argument("--next-only", "-x", action="store_true")
+    parser.add_argument("--draft", "-d", action="store_true")
     parser.add_argument(
         "--branch-prefix",
         default=get_default_branch_prefix(),
@@ -584,6 +582,10 @@ def cli() -> None:
     args = parser.parse_args()
     if args.debug:
         DEBUG = True
+
+    if args.draft:
+        DRAFT = True
+
     if args.setup:
         asyncio.run(do_setup())
     else:
